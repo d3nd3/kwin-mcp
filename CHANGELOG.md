@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-02-23
+
+### Fixed
+
+- `session_start` `screen_width`/`screen_height` parameters were being ignored — now correctly passed as `--width`/`--height` flags to `kwin_wayland`
+
+### Added
+
+- `keep_screenshots` option in `session_start` to preserve screenshot files after `session_stop`, useful for debugging and CI artifact collection
+- SEO documentation guidelines in `CLAUDE.md`, `docs-seo` custom agent, `release-notes` skill, GitHub issue/PR templates, and `CONTRIBUTING.md`
+
+## [0.5.0] - 2026-02-23
+
+### Added
+
+- **`AutomationEngine` (`core.py`)**: MCP-independent automation logic extracted from `server.py` into a standalone reusable class covering session, input, screenshot, and accessibility operations
+- **Interactive CLI (`kwin-mcp-cli`)**: New entry point with REPL and pipe mode for testing all 29 tools without an MCP client
+
+### Changed
+
+- `server.py` simplified to thin MCP wrappers delegating to `AutomationEngine`
+- Improved AT-SPI2 bus address propagation and reduced launcher sleep time
+
+## [0.4.2] - 2026-02-22
+
+### Changed
+
+- Added JSON Schema `description` fields to all parameters across all 29 MCP tools for improved discoverability and client-side documentation
+- Rewrote `README.md` with complete tool reference tables, architecture diagram, and SEO-optimized metadata
+
 ## [0.4.1] - 2026-02-22
 
 ### Fixed
@@ -57,6 +87,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keyboard input: text typing and key combinations via KWin EIS
 - FastMCP-based MCP server with stdio transport
 
+[0.5.1]: https://github.com/isac322/kwin-mcp/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/isac322/kwin-mcp/compare/v0.4.2...v0.5.0
+[0.4.2]: https://github.com/isac322/kwin-mcp/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/isac322/kwin-mcp/releases/tag/v0.4.1
 [0.4.0]: https://github.com/isac322/kwin-mcp/releases/tag/v0.4.0
 [0.3.0]: https://github.com/isac322/kwin-mcp/releases/tag/v0.3.0
