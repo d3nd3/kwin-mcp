@@ -36,11 +36,13 @@ uv run python -m kwin_mcp # Run server
 ## Architecture
 
 See ROADMAP.md. Key modules:
+- `core.py`: AutomationEngine — MCP-independent automation logic (session, input, screenshot, a11y)
+- `server.py`: Thin MCP wrappers delegating to AutomationEngine
+- `cli.py`: Interactive REPL + pipe mode via `cmd.Cmd` (`kwin-mcp-cli` entry point)
 - `session.py`: dbus-run-session + kwin_wayland --virtual (isolated environment)
 - `screenshot.py`: KWin ScreenShot2 D-Bus (screenshots)
 - `accessibility.py`: AT-SPI2 (widget tree)
-- `input.py`: inputsynth / fake-input (input injection)
-- `server.py`: MCP server (tool registration)
+- `input.py`: KWin EIS D-Bus + libei (input injection)
 
 ## Pre-work Checklist
 
@@ -48,6 +50,7 @@ See ROADMAP.md. Key modules:
 2. Start from the first incomplete item in the next milestone
 3. After code changes, run `uv run ruff check .` + `uv run ruff format .` + `uv run ty check`
 4. Update ROADMAP.md checklist when a milestone item is completed
+5. **Verify with actual MCP tools**: After modifying any kwin-mcp tool, you MUST call the actual MCP tool to verify it works in a real session. Lint/format/typecheck alone is NOT sufficient. Launch a session, run the tool, and confirm expected results before considering the task complete.
 
 ## System Dependencies (Arch/Manjaro)
 

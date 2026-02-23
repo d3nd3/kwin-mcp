@@ -112,12 +112,21 @@ class Session:
             start_new_session=True,
         )
 
-        # Read the D-Bus address from the wrapper's stdout (echoed first)
+        # Read startup output from the wrapper script.
+        # Expected lines: DBUS_SESSION_BUS_ADDRESS=..., READY
+        # Any other lines (e.g. from D-Bus activation) are ignored.
         dbus_address = ""
+        got_ready = False
         if self._process.stdout:
-            line = self._process.stdout.readline().decode().strip()
-            if line.startswith("DBUS_SESSION_BUS_ADDRESS="):
-                dbus_address = line.split("=", 1)[1]
+            while True:
+                line = self._process.stdout.readline().decode().strip()
+                if not line and self._process.poll() is not None:
+                    break
+                if line.startswith("DBUS_SESSION_BUS_ADDRESS="):
+                    dbus_address = line.split("=", 1)[1]
+                elif line == "READY":
+                    got_ready = True
+                    break
 
         # Wait for kwin to be ready (socket file appears)
         socket_path = Path(runtime_dir) / self._socket_name
@@ -129,13 +138,10 @@ class Session:
             msg = f"KWin failed to start. stderr: {stderr}"
             raise RuntimeError(msg)
 
-        # Wait for "READY" signal (D-Bus activation env updated)
-        if self._process.stdout:
-            ready_line = self._process.stdout.readline().decode().strip()
-            if ready_line != "READY":
-                self.stop()
-                msg = f"Session setup failed. Expected READY, got: {ready_line!r}"
-                raise RuntimeError(msg)
+        if not got_ready:
+            self.stop()
+            msg = "Session setup failed: did not receive READY signal"
+            raise RuntimeError(msg)
 
         screenshot_dir = Path(tempfile.mkdtemp(prefix="kwin-mcp-screenshots-"))
 
@@ -273,9 +279,12 @@ cleanup() {{
 }}
 trap cleanup EXIT TERM INT HUP
 
-# Start AT-SPI accessibility bus
+# Start the AT-SPI accessibility bus.
+# ATSPI_DBUS_IMPLEMENTATION is set in _build_env() to force dbus-daemon
+# instead of dbus-broker (which reuses the host's AT-SPI bus).
 /usr/lib/at-spi-bus-launcher --launch-immediately &
 AT_SPI_PID=$!
+sleep 0.2
 
 # Pre-set D-Bus activation environment BEFORE starting KWin.
 # When KWin triggers portal auto-activation, portal-kde will get
@@ -316,6 +325,10 @@ wait $KWIN_PID
             "XDG_CURRENT_DESKTOP": "KDE",
             "QT_LINUX_ACCESSIBILITY_ALWAYS_ON": "1",
             "QT_ACCESSIBILITY": "1",
+            # Force dbus-daemon for the AT-SPI bus instead of dbus-broker.
+            # dbus-broker with --scope=user reuses the host's existing AT-SPI bus,
+            # breaking accessibility isolation. Verified as REQUIRED.
+            "ATSPI_DBUS_IMPLEMENTATION": "dbus-daemon",
             # Allow direct D-Bus screenshot capture without portal authorization.
             # Safe in isolated virtual sessions where there is no user desktop to protect.
             "KWIN_SCREENSHOT_NO_PERMISSION_CHECKS": "1",

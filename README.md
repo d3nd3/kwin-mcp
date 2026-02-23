@@ -137,6 +137,9 @@ kwin-mcp
 
 # As a Python module
 python -m kwin_mcp
+
+# Interactive CLI (REPL for rapid testing)
+kwin-mcp-cli
 ```
 
 ## Available Tools
@@ -224,7 +227,9 @@ Claude Code / AI Agent
   |
   |  MCP (stdio)
   v
-kwin-mcp server  (29 tools)
+kwin-mcp server  (29 tools)       kwin-mcp-cli (interactive REPL)
+  |                                  |
+  +--- both delegate to AutomationEngine (core.py) ---+
   |
   |-- session_start / stop -----> dbus-run-session
   |                                 |-- at-spi-bus-launcher

@@ -1,6 +1,6 @@
 [project]
 name = "kwin-mcp"
-version = "0.4.2"
+version = "0.5.0"
 description = "MCP server for Linux desktop GUI automation on KDE Plasma 6 Wayland via isolated KWin virtual sessions"
 readme = "README.md"
 license = "MIT"
@@ -54,6 +54,7 @@ Changelog = "https://github.com/isac322/kwin-mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
 kwin-mcp = "kwin_mcp.server:main"
+kwin-mcp-cli = "kwin_mcp.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.10.3,<0.11.0"]

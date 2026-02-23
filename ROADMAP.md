@@ -53,12 +53,12 @@ Triple isolation ensures no impact on the host desktop:
 - [x] Return image via MCP tool
 - **Done**: Verified capturing app screen from isolated session as 52KB+ PNG
 
-### M3: AT-SPI2 Accessibility Tree (`accessibility.py`) ⚠️ Partial
+### M3: AT-SPI2 Accessibility Tree (`accessibility.py`) ✅
 - [x] Widget tree traversal via gi.repository.Atspi
 - [x] Extract role, name, state, coordinates, size
 - [x] Return as text format from MCP tool
-- [ ] Verify AT-SPI2 can access apps in isolated session
-- **Note**: AT-SPI2 registry not activating in isolated session. Needs further investigation.
+- [x] Verify AT-SPI2 can access apps in isolated session
+- **Done**: Fixed by running AT-SPI2 queries in subprocess with isolated session's D-Bus address
 
 ### M4: Input Injection (`input.py`) ✅
 - [x] Obtain EIS fd via KWin's org.kde.KWin.EIS.RemoteDesktop D-Bus interface
@@ -103,7 +103,17 @@ Triple isolation ensures no impact on the host desktop:
 - [x] Wayland protocol diagnostics (`wayland_info` tool)
 - **Total tools**: 27 → 30
 
-### M8: Pluggable CLI Backend (Auto-detect Alternatives)
+### M8: Code Separation + AT-SPI2 Cleanup ✅
+- [x] Extract `AutomationEngine` class from `server.py` into `core.py` (MCP-independent logic)
+- [x] Slim down `server.py` to thin MCP wrappers delegating to `AutomationEngine`
+- [x] Create `cli.py` — interactive REPL + pipe mode via `cmd.Cmd` for rapid testing
+- [x] Add `kwin-mcp-cli` entry point to `pyproject.toml`
+- [x] Verify and remove unnecessary `AT_SPI_BUS_ADDRESS` propagation chain (was not needed)
+- [x] Confirm `ATSPI_DBUS_IMPLEMENTATION=dbus-daemon` is required (verified)
+- [x] Reduce AT-SPI bus launcher sleep from 0.5s to 0.2s (verified)
+- **Architecture**: `core.py` (AutomationEngine) ← `server.py` (MCP wrapper) + `cli.py` (CLI wrapper)
+
+### M9: Pluggable CLI Backend (Auto-detect Alternatives)
 - [ ] Research functionally equivalent alternatives for each external CLI (`wl-copy`/`wl-paste`, `wtype`, `spectacle`, `dbus-send`)
 - [ ] Implement auto-detection: discover available CLIs at runtime and select the best match
 - [ ] Ensure all alternatives are functionally identical (no behavioral differences)

@@ -1,114 +1,20 @@
-"""MCP server for KDE Wayland GUI automation."""
+"""MCP server for KDE Wayland GUI automation.
+
+Thin wrapper that registers MCP tools with parameter descriptions,
+delegating all logic to AutomationEngine in core.py.
+"""
 
 from __future__ import annotations
 
-import os
-import shlex
-import shutil
-import subprocess
-import time
 from typing import Annotated
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
-from kwin_mcp.accessibility import find_elements, get_accessibility_tree
-from kwin_mcp.input import InputBackend, MouseButton
-from kwin_mcp.screenshot import capture_frame_burst, capture_screenshot_to_file
-from kwin_mcp.session import Session, SessionConfig
+from kwin_mcp.core import AutomationEngine
 
 mcp = FastMCP("kwin-mcp")
-
-# Install hints for external binaries
-_INSTALL_HINTS: dict[str, str] = {
-    "wl-paste": (
-        "wl-paste not found. Install wl-clipboard "
-        "(e.g. 'sudo pacman -S wl-clipboard' or 'sudo apt install wl-clipboard')."
-    ),
-    "wl-copy": (
-        "wl-copy not found. Install wl-clipboard "
-        "(e.g. 'sudo pacman -S wl-clipboard' or 'sudo apt install wl-clipboard')."
-    ),
-    "wtype": (
-        "wtype not found. Install wtype "
-        "(e.g. 'sudo pacman -S wtype' or build from https://github.com/atx/wtype)."
-    ),
-    "dbus-send": (
-        "dbus-send not found. Install dbus (e.g. 'sudo pacman -S dbus' or 'sudo apt install dbus')."
-    ),
-    "spectacle": (
-        "spectacle not found. Install spectacle "
-        "(e.g. 'sudo pacman -S spectacle' or 'sudo apt install kde-spectacle')."
-    ),
-    "wayland-info": (
-        "wayland-info not found. Install wayland-utils "
-        "(e.g. 'sudo pacman -S wayland-utils' or 'sudo apt install wayland-utils')."
-    ),
-}
-
-# Global session state
-_session: Session | None = None
-_input: InputBackend | None = None
-_clipboard_enabled: bool = False
-_wl_copy_proc: subprocess.Popen[bytes] | None = None
-
-
-def _get_session() -> Session:
-    if _session is None or not _session.is_running:
-        msg = "No active session. Call session_start first."
-        raise RuntimeError(msg)
-    return _session
-
-
-def _get_input() -> InputBackend:
-    if _input is None:
-        msg = "No input backend. Call session_start first."
-        raise RuntimeError(msg)
-    return _input
-
-
-def _session_env() -> dict[str, str]:
-    """Build environment dict for tools that need the isolated session."""
-    session = _get_session()
-    env = {**os.environ}
-    info = session.info
-    if info:
-        if info.dbus_address:
-            env["DBUS_SESSION_BUS_ADDRESS"] = info.dbus_address
-        env["WAYLAND_DISPLAY"] = info.wayland_socket
-    env["QT_QPA_PLATFORM"] = "wayland"
-    env.pop("DISPLAY", None)
-    return env
-
-
-def _with_frame_capture(
-    action_result: str,
-    screenshot_after_ms: list[int] | None,
-) -> str:
-    """Append frame captures to an action result if requested.
-
-    Captures screenshots at specified delays (in ms) after the action
-    using the fast D-Bus capture method (~15-30ms per frame).
-    """
-    if not screenshot_after_ms:
-        return action_result
-
-    session = _get_session()
-    info = session.info
-    if info is None:
-        return action_result
-
-    frames = capture_frame_burst(
-        dbus_address=info.dbus_address,
-        output_dir=info.screenshot_dir,
-        delays_ms=screenshot_after_ms,
-    )
-
-    lines = [action_result, f"Captured {len(frames)} frames:"]
-    for delay_ms, path in zip(sorted(screenshot_after_ms), frames, strict=True):
-        size_kb = path.stat().st_size / 1024
-        lines.append(f"  {delay_ms}ms: {path} ({size_kb:.1f} KB)")
-    return "\n".join(lines)
+_engine = AutomationEngine()
 
 
 # ── Session management ──────────────────────────────────────────────────
@@ -143,40 +49,13 @@ def session_start(
     call session_stop first. Returns session status including the Wayland socket
     path, launched app PID (if any), and input backend availability.
     """
-    global _session, _input, _clipboard_enabled
-
-    if _session is not None and _session.is_running:
-        return "Session already running. Call session_stop first."
-
-    _clipboard_enabled = enable_clipboard
-
-    _session = Session()
-    config = SessionConfig(
+    return _engine.session_start(
+        app_command=app_command,
         screen_width=screen_width,
         screen_height=screen_height,
         enable_clipboard=enable_clipboard,
+        env=env,
     )
-    info = _session.start(config)
-
-    result = f"Session started. Wayland socket: {info.wayland_socket}"
-
-    if app_command:
-        cmd = shlex.split(app_command)
-        app_info = _session.launch_app(cmd, extra_env=env)
-        result += f"\nApp launched: {app_command} (PID={app_info.pid})"
-        result += f"\nApp log: {app_info.log_path}"
-
-    # Set up input backend via KWin's EIS D-Bus interface
-    time.sleep(0.5)
-    try:
-        _input = InputBackend(info.dbus_address)
-    except RuntimeError:
-        _input = None
-
-    input_status = "Input backend: KWin EIS" if _input else "No input backend available"
-    result += f"\n{input_status}"
-
-    return result
 
 
 @mcp.tool()
@@ -187,27 +66,7 @@ def session_stop() -> str:
     Cleans up temporary files and clipboard processes. Safe to call when
     no session is running (returns "No session running.").
     """
-    global _session, _input, _wl_copy_proc, _clipboard_enabled
-
-    if _session is None:
-        return "No session running."
-
-    # Clean up wl-copy process if active
-    if _wl_copy_proc is not None:
-        _wl_copy_proc.terminate()
-        try:
-            _wl_copy_proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            _wl_copy_proc.kill()
-        _wl_copy_proc = None
-    _clipboard_enabled = False
-
-    if _input is not None:
-        _input.close()
-    _session.stop()
-    _session = None
-    _input = None
-    return "Session stopped."
+    return _engine.session_stop()
 
 
 # ── Screenshot / Accessibility ───────────────────────────────────────────
@@ -225,20 +84,7 @@ def screenshot(
     Requires an active session. Returns the file path to the saved PNG image
     and its size in KB.
     """
-    session = _get_session()
-    info = session.info
-    if info is None:
-        msg = "No session info available"
-        raise RuntimeError(msg)
-
-    path = capture_screenshot_to_file(
-        dbus_address=info.dbus_address,
-        wayland_socket=info.wayland_socket,
-        include_cursor=include_cursor,
-        output_dir=info.screenshot_dir,
-    )
-    size_kb = path.stat().st_size / 1024
-    return f"Screenshot saved: {path} ({size_kb:.1f} KB)"
+    return _engine.screenshot(include_cursor=include_cursor)
 
 
 @mcp.tool()
@@ -255,8 +101,7 @@ def accessibility_tree(
     and bounding box coordinates. Use this to understand UI structure before
     interacting with elements.
     """
-    _get_session()  # Ensure session is running
-    return get_accessibility_tree(app_name=app_name, max_depth=max_depth)
+    return _engine.accessibility_tree(app_name=app_name, max_depth=max_depth)
 
 
 @mcp.tool()
@@ -276,18 +121,7 @@ def find_ui_elements(
     (x, y, width, height), and available actions. Use this to locate specific
     buttons, inputs, or labels before clicking or interacting.
     """
-    _get_session()
-    elements = find_elements(query, app_name=app_name)
-    if not elements:
-        return f"No elements found matching '{query}'"
-
-    lines = [f"Found {len(elements)} elements matching '{query}':\n"]
-    for el in elements:
-        actions_str = f" [actions: {', '.join(el.actions)}]" if el.actions else ""
-        lines.append(
-            f'- [{el.role}] "{el.name}" @ ({el.x}, {el.y}, {el.width}x{el.height}){actions_str}'
-        )
-    return "\n".join(lines)
+    return _engine.find_ui_elements(query=query, app_name=app_name)
 
 
 # ── Mouse tools ──────────────────────────────────────────────────────────
@@ -330,22 +164,16 @@ def mouse_click(
     corner. Returns a description of the click performed. Optionally captures
     screenshot frames after the click for visual feedback.
     """
-    inp = _get_input()
-    btn = MouseButton(button)
-    click_count = 3 if triple else (2 if double else 1)
-    inp.mouse_click(x, y, btn, click_count=click_count, modifiers=modifiers, hold_ms=hold_ms)
-
-    desc = f"Clicked {button} at ({x}, {y})"
-    if triple:
-        desc += " (triple)"
-    elif double:
-        desc += " (double)"
-    if modifiers:
-        desc += f" with {'+'.join(modifiers)}"
-    if hold_ms > 0:
-        desc += f" held {hold_ms}ms"
-
-    return _with_frame_capture(desc, screenshot_after_ms)
+    return _engine.mouse_click(
+        x=x,
+        y=y,
+        button=button,
+        double=double,
+        triple=triple,
+        modifiers=modifiers,
+        hold_ms=hold_ms,
+        screenshot_after_ms=screenshot_after_ms,
+    )
 
 
 @mcp.tool()
@@ -365,10 +193,7 @@ def mouse_move(
     Use this to trigger hover effects, reveal tooltips, or position the
     cursor before a separate button-down action.
     """
-    inp = _get_input()
-    inp.mouse_move(x, y)
-    result = f"Mouse moved to ({x}, {y})"
-    return _with_frame_capture(result, screenshot_after_ms)
+    return _engine.mouse_move(x=x, y=y, screenshot_after_ms=screenshot_after_ms)
 
 
 @mcp.tool()
@@ -405,14 +230,9 @@ def mouse_scroll(
     Moves the cursor to (x, y) and performs a scroll action. Returns a
     description of the scroll performed.
     """
-    inp = _get_input()
-    inp.mouse_scroll(x, y, delta, horizontal=horizontal, discrete=discrete, steps=steps)
-    direction = "horizontal" if horizontal else "vertical"
-    mode = "discrete" if discrete else "smooth"
-    desc = f"Scrolled {direction} ({mode}) by {delta} at ({x}, {y})"
-    if steps > 1:
-        desc += f" in {steps} steps"
-    return desc
+    return _engine.mouse_scroll(
+        x=x, y=y, delta=delta, horizontal=horizontal, discrete=discrete, steps=steps
+    )
 
 
 @mcp.tool()
@@ -446,19 +266,16 @@ def mouse_drag(
     optionally through waypoints, then releases. Returns a description of
     the drag performed.
     """
-    inp = _get_input()
-    btn = MouseButton(button)
-    wp: list[tuple[int, int, int]] | None = None
-    if waypoints:
-        wp = [(w[0], w[1], w[2]) for w in waypoints]
-    inp.mouse_drag(from_x, from_y, to_x, to_y, button=btn, modifiers=modifiers, waypoints=wp)
-
-    desc = f"Dragged from ({from_x}, {from_y}) to ({to_x}, {to_y})"
-    if modifiers:
-        desc += f" with {'+'.join(modifiers)}"
-    if waypoints:
-        desc += f" via {len(waypoints)} waypoints"
-    return _with_frame_capture(desc, screenshot_after_ms)
+    return _engine.mouse_drag(
+        from_x=from_x,
+        from_y=from_y,
+        to_x=to_x,
+        to_y=to_y,
+        button=button,
+        modifiers=modifiers,
+        waypoints=waypoints,
+        screenshot_after_ms=screenshot_after_ms,
+    )
 
 
 @mcp.tool()
@@ -475,9 +292,7 @@ def mouse_button_down(
     hold-and-interact patterns. The button stays pressed until
     mouse_button_up is called.
     """
-    inp = _get_input()
-    inp.mouse_button_down(x, y, MouseButton(button))
-    return f"Button {button} pressed at ({x}, {y})"
+    return _engine.mouse_button_down(x=x, y=y, button=button)
 
 
 @mcp.tool()
@@ -493,9 +308,7 @@ def mouse_button_up(
     Pair with mouse_button_down. The release happens at the specified
     coordinates, which may differ from where the button was pressed.
     """
-    inp = _get_input()
-    inp.mouse_button_up(x, y, MouseButton(button))
-    return f"Button {button} released at ({x}, {y})"
+    return _engine.mouse_button_up(x=x, y=y, button=button)
 
 
 # ── Keyboard tools ───────────────────────────────────────────────────────
@@ -524,10 +337,7 @@ def keyboard_type(
     characters. For non-ASCII text (Korean, CJK, emoji, accented characters),
     use keyboard_type_unicode instead.
     """
-    inp = _get_input()
-    inp.keyboard_type(text)
-    result = f"Typed: {text!r}"
-    return _with_frame_capture(result, screenshot_after_ms)
+    return _engine.keyboard_type(text=text, screenshot_after_ms=screenshot_after_ms)
 
 
 @mcp.tool()
@@ -548,18 +358,7 @@ def keyboard_type_unicode(
     Use this instead of keyboard_type when the text contains non-ASCII
     characters (e.g. Korean, CJK, emoji, accented characters).
     """
-    if not shutil.which("wtype") and not shutil.which("wl-copy"):
-        return (
-            "Neither wtype nor wl-copy found. Install at least one: "
-            "wtype (e.g. 'sudo pacman -S wtype') or "
-            "wl-clipboard (e.g. 'sudo pacman -S wl-clipboard')."
-        )
-    inp = _get_input()
-    session = _get_session()
-    dbus_addr = session.info.dbus_address if session.info else None
-    ok = inp.keyboard_type_unicode(text, dbus_address=dbus_addr)
-    result = f"Typed unicode: {text!r}" if ok else f"Failed to type unicode: {text!r}"
-    return _with_frame_capture(result, screenshot_after_ms)
+    return _engine.keyboard_type_unicode(text=text, screenshot_after_ms=screenshot_after_ms)
 
 
 @mcp.tool()
@@ -584,10 +383,7 @@ def keyboard_key(
     Supports single keys and modifier combinations joined with "+".
     Returns a confirmation of the key pressed.
     """
-    inp = _get_input()
-    inp.keyboard_key(key)
-    result = f"Pressed: {key}"
-    return _with_frame_capture(result, screenshot_after_ms)
+    return _engine.keyboard_key(key=key, screenshot_after_ms=screenshot_after_ms)
 
 
 @mcp.tool()
@@ -603,9 +399,7 @@ def keyboard_key_down(
     (e.g. hold Ctrl while clicking multiple items). The key stays pressed
     until keyboard_key_up is called with the same key.
     """
-    inp = _get_input()
-    inp.keyboard_key_down(key)
-    return f"Key down: {key}"
+    return _engine.keyboard_key_down(key=key)
 
 
 @mcp.tool()
@@ -620,9 +414,7 @@ def keyboard_key_up(
     Pair with keyboard_key_down. Must be called to release keys that
     were pressed with keyboard_key_down.
     """
-    inp = _get_input()
-    inp.keyboard_key_up(key)
-    return f"Key up: {key}"
+    return _engine.keyboard_key_up(key=key)
 
 
 # ── Touch tools ──────────────────────────────────────────────────────────
@@ -648,12 +440,7 @@ def touch_tap(
     Simulates a single finger touch-and-release. Set hold_ms > 0 for
     long-press gestures. Returns a description of the tap performed.
     """
-    inp = _get_input()
-    inp.touch_tap(x, y, hold_ms=hold_ms)
-    desc = f"Touch tap at ({x}, {y})"
-    if hold_ms > 0:
-        desc += f" held {hold_ms}ms"
-    return _with_frame_capture(desc, screenshot_after_ms)
+    return _engine.touch_tap(x=x, y=y, hold_ms=hold_ms, screenshot_after_ms=screenshot_after_ms)
 
 
 @mcp.tool()
@@ -672,10 +459,14 @@ def touch_swipe(
 
     Returns a description of the swipe performed.
     """
-    inp = _get_input()
-    inp.touch_swipe(from_x, from_y, to_x, to_y, duration_ms=duration_ms)
-    desc = f"Touch swipe from ({from_x}, {from_y}) to ({to_x}, {to_y}) in {duration_ms}ms"
-    return _with_frame_capture(desc, screenshot_after_ms)
+    return _engine.touch_swipe(
+        from_x=from_x,
+        from_y=from_y,
+        to_x=to_x,
+        to_y=to_y,
+        duration_ms=duration_ms,
+        screenshot_after_ms=screenshot_after_ms,
+    )
 
 
 @mcp.tool()
@@ -706,11 +497,14 @@ def touch_pinch(
     Simulates two fingers moving symmetrically toward or away from the
     center point. Returns a description of the pinch performed.
     """
-    inp = _get_input()
-    inp.touch_pinch(center_x, center_y, start_distance, end_distance, duration_ms=duration_ms)
-    direction = "in" if end_distance < start_distance else "out"
-    desc = f"Pinch {direction} at ({center_x}, {center_y}): {start_distance}→{end_distance}px"
-    return _with_frame_capture(desc, screenshot_after_ms)
+    return _engine.touch_pinch(
+        center_x=center_x,
+        center_y=center_y,
+        start_distance=start_distance,
+        end_distance=end_distance,
+        duration_ms=duration_ms,
+        screenshot_after_ms=screenshot_after_ms,
+    )
 
 
 @mcp.tool()
@@ -735,12 +529,15 @@ def touch_multi_swipe(
     All fingers move in parallel from the start to end coordinates.
     Returns a description of the swipe performed.
     """
-    inp = _get_input()
-    inp.touch_multi_swipe(from_x, from_y, to_x, to_y, fingers=fingers, duration_ms=duration_ms)
-    desc = (
-        f"{fingers}-finger swipe from ({from_x}, {from_y}) to ({to_x}, {to_y}) in {duration_ms}ms"
+    return _engine.touch_multi_swipe(
+        from_x=from_x,
+        from_y=from_y,
+        to_x=to_x,
+        to_y=to_y,
+        fingers=fingers,
+        duration_ms=duration_ms,
+        screenshot_after_ms=screenshot_after_ms,
     )
-    return _with_frame_capture(desc, screenshot_after_ms)
 
 
 # ── Clipboard tools ──────────────────────────────────────────────────────
@@ -754,22 +551,7 @@ def clipboard_get() -> str:
     installed. Returns the clipboard text or an error message if clipboard
     is not enabled or empty.
     """
-    if not _clipboard_enabled:
-        return "Clipboard not enabled. Pass enable_clipboard=True to session_start."
-
-    env = _session_env()
-    try:
-        result = subprocess.run(
-            ["wl-paste", "--no-newline"],
-            env=env,
-            capture_output=True,
-            timeout=5,
-        )
-    except FileNotFoundError:
-        return _INSTALL_HINTS["wl-paste"]
-    if result.returncode != 0:
-        return f"Failed to read clipboard: {result.stderr.decode(errors='replace')}"
-    return result.stdout.decode(errors="replace")
+    return _engine.clipboard_get()
 
 
 @mcp.tool()
@@ -782,36 +564,7 @@ def clipboard_set(
     installed. The content remains available until replaced by another
     clipboard_set call or the session ends.
     """
-    global _wl_copy_proc
-
-    if not _clipboard_enabled:
-        return "Clipboard not enabled. Pass enable_clipboard=True to session_start."
-
-    # Terminate previous wl-copy process (replaced by new content)
-    if _wl_copy_proc is not None:
-        _wl_copy_proc.terminate()
-        try:
-            _wl_copy_proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            _wl_copy_proc.kill()
-        _wl_copy_proc = None
-
-    env = _session_env()
-    # wl-copy forks: parent exits immediately, child serves clipboard.
-    # Using Popen + DEVNULL avoids the pipe-blocking issue that
-    # subprocess.run(capture_output=True) causes with forked children.
-    try:
-        _wl_copy_proc = subprocess.Popen(
-            ["wl-copy", "--", text],
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except FileNotFoundError:
-        return _INSTALL_HINTS["wl-copy"]
-    time.sleep(0.1)  # Wait for fork to complete
-    return f"Clipboard set: {text!r}"
+    return _engine.clipboard_set(text=text)
 
 
 # ── Wait-for-UI tools ───────────────────────────────────────────────────
@@ -836,26 +589,12 @@ def wait_for_element(
     Returns matching elements in the same format as find_ui_elements, or a
     timeout error message.
     """
-    _get_session()
-    deadline = time.monotonic() + timeout_ms / 1000.0
-    interval = poll_interval_ms / 1000.0
-
-    while True:
-        elements = find_elements(query, app_name=app_name)
-        if elements:
-            lines = [f"Found {len(elements)} elements matching '{query}':\n"]
-            for el in elements:
-                actions_str = f" [actions: {', '.join(el.actions)}]" if el.actions else ""
-                lines.append(
-                    f'- [{el.role}] "{el.name}" @ '
-                    f"({el.x}, {el.y}, {el.width}x{el.height}){actions_str}"
-                )
-            return "\n".join(lines)
-
-        if time.monotonic() >= deadline:
-            return f"Timeout after {timeout_ms}ms: no elements matching '{query}'"
-
-        time.sleep(interval)
+    return _engine.wait_for_element(
+        query=query,
+        app_name=app_name,
+        timeout_ms=timeout_ms,
+        poll_interval_ms=poll_interval_ms,
+    )
 
 
 # ── Window management tools ──────────────────────────────────────────────
@@ -877,10 +616,7 @@ def launch_app(
     Requires an active session. Returns the app PID (for use with read_app_log)
     and the log file path.
     """
-    session = _get_session()
-    cmd = shlex.split(command)
-    app_info = session.launch_app(cmd, extra_env=env)
-    return f"App launched: {command} (PID={app_info.pid})\nApp log: {app_info.log_path}"
+    return _engine.launch_app(command=command, env=env)
 
 
 @mcp.tool()
@@ -891,24 +627,7 @@ def list_windows() -> str:
     Applications that do not support accessibility (AT-SPI2) may not appear.
     Returns a formatted list of app names with window counts.
     """
-    _get_session()
-    import gi
-
-    gi.require_version("Atspi", "2.0")
-    from gi.repository import Atspi
-
-    desktop = Atspi.get_desktop(0)
-    lines: list[str] = []
-    for i in range(desktop.get_child_count()):
-        app = desktop.get_child_at_index(i)
-        if app is None:
-            continue
-        name = app.get_name() or "(unnamed)"
-        child_count = app.get_child_count()
-        lines.append(f"- {name} ({child_count} windows)")
-    if not lines:
-        return "(no accessible applications found)"
-    return f"Applications ({len(lines)}):\n" + "\n".join(lines)
+    return _engine.list_windows()
 
 
 @mcp.tool()
@@ -923,33 +642,7 @@ def focus_window(
     Searches for an application whose name contains the given string
     (case-insensitive) and activates its first focusable window via AT-SPI2.
     """
-    _get_session()
-    import gi
-
-    gi.require_version("Atspi", "2.0")
-    from gi.repository import Atspi
-
-    desktop = Atspi.get_desktop(0)
-    for i in range(desktop.get_child_count()):
-        app = desktop.get_child_at_index(i)
-        if app is None:
-            continue
-        name = app.get_name() or ""
-        if app_name.lower() in name.lower():
-            # Try to find a focusable window child
-            for j in range(app.get_child_count()):
-                win = app.get_child_at_index(j)
-                if win is None:
-                    continue
-                try:
-                    component = win.get_component_iface()
-                    if component is not None:
-                        component.grab_focus()
-                        return f"Focused: {name}"
-                except Exception:
-                    continue
-            return f"Found '{name}' but could not focus it"
-    return f"No application matching '{app_name}' found"
+    return _engine.focus_window(app_name=app_name)
 
 
 # ── D-Bus tools ──────────────────────────────────────────────────────────
@@ -974,30 +667,9 @@ def dbus_call(
     Executes a D-Bus method call and returns the reply. Arguments must use
     dbus-send type notation (e.g. "string:value", "int32:42", "boolean:true").
     """
-    env = _session_env()
-    cmd = [
-        "dbus-send",
-        "--session",
-        "--print-reply",
-        f"--dest={service}",
-        f"{path}",
-        f"{interface}.{method}",
-    ]
-    if args:
-        cmd.extend(args)
-
-    try:
-        result = subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            timeout=10,
-        )
-    except FileNotFoundError:
-        return _INSTALL_HINTS["dbus-send"]
-    if result.returncode != 0:
-        return f"D-Bus call failed: {result.stderr.decode(errors='replace')}"
-    return result.stdout.decode(errors="replace")
+    return _engine.dbus_call(
+        service=service, path=path, interface=interface, method=method, args=args
+    )
 
 
 @mcp.tool()
@@ -1016,8 +688,7 @@ def read_app_log(
     Returns the combined stdout and stderr text captured since the app was
     launched. Use the PID from launch_app or session_start to identify the app.
     """
-    session = _get_session()
-    return session.read_app_log(pid, last_n_lines=last_n_lines)
+    return _engine.read_app_log(pid=pid, last_n_lines=last_n_lines)
 
 
 @mcp.tool()
@@ -1036,26 +707,7 @@ def wayland_info(
     verifying that restricted protocols are accessible. Returns the full
     output or only lines matching the filter.
     """
-    env = _session_env()
-    try:
-        result = subprocess.run(
-            ["wayland-info"],
-            env=env,
-            capture_output=True,
-            timeout=10,
-        )
-    except FileNotFoundError:
-        return _INSTALL_HINTS["wayland-info"]
-    if result.returncode != 0:
-        return f"wayland-info failed: {result.stderr.decode(errors='replace')}"
-
-    output = result.stdout.decode(errors="replace")
-    if filter_protocol:
-        lines = [line for line in output.splitlines() if filter_protocol in line]
-        if not lines:
-            return f"No protocols matching '{filter_protocol}' found."
-        return "\n".join(lines)
-    return output
+    return _engine.wayland_info(filter_protocol=filter_protocol)
 
 
 def main() -> None:

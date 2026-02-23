@@ -1,8 +1,15 @@
-"""AT-SPI2 accessibility tree reader."""
+"""AT-SPI2 accessibility tree reader.
+
+Can be run as a subprocess CLI for isolated D-Bus session support.
+Reads a JSON request from stdin and writes a JSON response to stdout.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+import sys
+import time
+from dataclasses import asdict, dataclass
 
 import gi
 
@@ -91,6 +98,92 @@ def find_elements(query: str, app_name: str = "") -> list[ElementInfo]:
         _search_element(app, query_lower, results, depth=0, max_depth=15)
 
     return results
+
+
+def list_windows() -> str:
+    """List accessible application windows.
+
+    Returns:
+        Formatted list of app names with window counts.
+    """
+    desktop = Atspi.get_desktop(0)
+    lines: list[str] = []
+    for i in range(desktop.get_child_count()):
+        app = desktop.get_child_at_index(i)
+        if app is None:
+            continue
+        name = app.get_name() or "(unnamed)"
+        child_count = app.get_child_count()
+        lines.append(f"- {name} ({child_count} windows)")
+    if not lines:
+        return "(no accessible applications found)"
+    return f"Applications ({len(lines)}):\n" + "\n".join(lines)
+
+
+def focus_window(app_name: str) -> str:
+    """Focus a window by application name.
+
+    Args:
+        app_name: Application name substring (case-insensitive).
+
+    Returns:
+        Result message.
+    """
+    desktop = Atspi.get_desktop(0)
+    for i in range(desktop.get_child_count()):
+        app = desktop.get_child_at_index(i)
+        if app is None:
+            continue
+        name = app.get_name() or ""
+        if app_name.lower() in name.lower():
+            for j in range(app.get_child_count()):
+                win = app.get_child_at_index(j)
+                if win is None:
+                    continue
+                try:
+                    component = win.get_component_iface()
+                    if component is not None:
+                        component.grab_focus()
+                        return f"Focused: {name}"
+                except Exception:
+                    continue
+            return f"Found '{name}' but could not focus it"
+    return f"No application matching '{app_name}' found"
+
+
+def wait_for_elements(
+    query: str,
+    app_name: str = "",
+    timeout_ms: int = 5000,
+    poll_interval_ms: int = 200,
+) -> list[ElementInfo]:
+    """Poll for elements matching a query until found or timeout.
+
+    Args:
+        query: Search string (case-insensitive).
+        app_name: Filter to a specific application.
+        timeout_ms: Maximum wait time in milliseconds.
+        poll_interval_ms: Polling interval in milliseconds.
+
+    Returns:
+        List of matching elements.
+
+    Raises:
+        TimeoutError: If no elements found within timeout.
+    """
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    interval = poll_interval_ms / 1000.0
+
+    while True:
+        elements = find_elements(query, app_name=app_name)
+        if elements:
+            return elements
+
+        if time.monotonic() >= deadline:
+            msg = f"Timeout after {timeout_ms}ms: no elements matching '{query}'"
+            raise TimeoutError(msg)
+
+        time.sleep(interval)
 
 
 def _format_element(
@@ -201,3 +294,58 @@ def _extract_info(element: Atspi.Accessible, depth: int) -> ElementInfo:
         children_count=element.get_child_count(),
         depth=depth,
     )
+
+
+# ── CLI entrypoint for subprocess execution ──────────────────────────────
+
+
+def _handle_request(request: dict) -> dict:
+    """Dispatch a JSON request to the appropriate function."""
+    op = request.get("op", "")
+
+    if op == "tree":
+        result = get_accessibility_tree(
+            app_name=request.get("app_name", ""),
+            max_depth=request.get("max_depth", 15),
+        )
+        return {"ok": True, "result": result}
+
+    if op == "find":
+        elements = find_elements(
+            query=request.get("query", ""),
+            app_name=request.get("app_name", ""),
+        )
+        return {"ok": True, "result": [asdict(e) for e in elements]}
+
+    if op == "wait":
+        try:
+            elements = wait_for_elements(
+                query=request.get("query", ""),
+                app_name=request.get("app_name", ""),
+                timeout_ms=request.get("timeout_ms", 5000),
+                poll_interval_ms=request.get("poll_interval_ms", 200),
+            )
+        except TimeoutError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "result": [asdict(e) for e in elements]}
+
+    if op == "list_windows":
+        return {"ok": True, "result": list_windows()}
+
+    if op == "focus_window":
+        result = focus_window(app_name=request.get("app_name", ""))
+        return {"ok": True, "result": result}
+
+    return {"ok": False, "error": f"Unknown operation: {op}"}
+
+
+if __name__ == "__main__":
+    raw = sys.stdin.read()
+    try:
+        req = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        json.dump({"ok": False, "error": f"Invalid JSON: {exc}"}, sys.stdout)
+        sys.exit(1)
+
+    resp = _handle_request(req)
+    json.dump(resp, sys.stdout)
