@@ -26,6 +26,7 @@ class SessionConfig:
     screen_width: int = 1920
     screen_height: int = 1080
     enable_clipboard: bool = False
+    keep_screenshots: bool = False
     extra_env: dict[str, str] = field(default_factory=dict)
 
 
@@ -65,6 +66,7 @@ class Session:
         self._info: SessionInfo | None = None
         self._socket_name: str = ""
         self._app_counter: int = 0
+        self._config: SessionConfig | None = None
 
     @property
     def is_running(self) -> bool:
@@ -91,6 +93,7 @@ class Session:
 
         if config is None:
             config = SessionConfig()
+        self._config = config
 
         self._socket_name = config.socket_name or f"wayland-mcp-{os.getpid()}-{int(time.time())}"
 
@@ -254,8 +257,9 @@ class Session:
             with contextlib.suppress(subprocess.TimeoutExpired):
                 self._process.wait(timeout=3)
 
-        # Clean up screenshot directory
-        if self._info and self._info.screenshot_dir.exists():
+        # Clean up screenshot directory unless keep_screenshots is set
+        keep = self._config is not None and self._config.keep_screenshots
+        if not keep and self._info and self._info.screenshot_dir.exists():
             shutil.rmtree(self._info.screenshot_dir, ignore_errors=True)
 
         # Clean up socket files
@@ -267,7 +271,7 @@ class Session:
         self._process = None
         self._info = None
 
-    def _build_wrapper_script(self, _config: SessionConfig) -> str:
+    def _build_wrapper_script(self, config: SessionConfig) -> str:
         """Build the bash script that runs inside dbus-run-session."""
         return f"""\
 echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
@@ -301,7 +305,9 @@ dbus-update-activation-environment WAYLAND_DISPLAY={self._socket_name} QT_QPA_PL
 env -u WAYLAND_DISPLAY -u QT_QPA_PLATFORM \
     KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 \
     KWIN_SCREENSHOT_NO_PERMISSION_CHECKS=1 \
-    kwin_wayland --virtual --no-lockscreen --socket {self._socket_name} &
+    kwin_wayland --virtual --no-lockscreen \
+    --width {config.screen_width} --height {config.screen_height} \
+    --socket {self._socket_name} &
 KWIN_PID=$!
 
 # Wait for KWin socket to appear

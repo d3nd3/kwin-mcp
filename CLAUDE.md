@@ -50,7 +50,7 @@ See ROADMAP.md. Key modules:
 2. Start from the first incomplete item in the next milestone
 3. After code changes, run `uv run ruff check .` + `uv run ruff format .` + `uv run ty check`
 4. Update ROADMAP.md checklist when a milestone item is completed
-5. **Verify with actual MCP tools**: After modifying any kwin-mcp tool, you MUST call the actual MCP tool to verify it works in a real session. Lint/format/typecheck alone is NOT sufficient. Launch a session, run the tool, and confirm expected results before considering the task complete.
+5. **Verify with CLI, not MCP tools**: After modifying any kwin-mcp code, verify via the CLI (`uv run python -m kwin_mcp.cli`), NOT the MCP server tools. The MCP server process is already running with the old code loaded in memory — calling MCP tools after editing source files will NOT reflect the changes. Use the CLI to launch a session and test the modified functionality. Use `keep_screenshots=true` in `session_start` to preserve screenshot files after `session_stop` (they are deleted by default). Files in `/tmp/kwin-mcp-screenshots-*` must be cleaned up manually when this option is used.
 
 ## System Dependencies (Arch/Manjaro)
 

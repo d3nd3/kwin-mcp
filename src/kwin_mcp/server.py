@@ -38,6 +38,13 @@ def session_start(
             "because wl-copy can hang in isolated sessions."
         ),
     ] = False,
+    keep_screenshots: Annotated[
+        bool,
+        Field(
+            description="Keep screenshot files after session_stop instead of deleting them. "
+            "Useful for debugging. Files must be cleaned up manually when enabled."
+        ),
+    ] = False,
     env: Annotated[
         dict[str, str] | None,
         Field(description="Extra environment variables to pass to the launched app."),
@@ -54,6 +61,7 @@ def session_start(
         screen_width=screen_width,
         screen_height=screen_height,
         enable_clipboard=enable_clipboard,
+        keep_screenshots=keep_screenshots,
         env=env,
     )
 

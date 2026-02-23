@@ -142,6 +142,7 @@ class AutomationEngine:
         screen_width: int = 1920,
         screen_height: int = 1080,
         enable_clipboard: bool = False,
+        keep_screenshots: bool = False,
         env: dict[str, str] | None = None,
     ) -> str:
         """Start an isolated KWin Wayland session, optionally launching an app."""
@@ -155,6 +156,7 @@ class AutomationEngine:
             screen_width=screen_width,
             screen_height=screen_height,
             enable_clipboard=enable_clipboard,
+            keep_screenshots=keep_screenshots,
         )
         info = self._session.start(config)
 
