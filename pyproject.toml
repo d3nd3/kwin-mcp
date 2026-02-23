@@ -8,17 +8,22 @@ authors = [{ name = "Byeonghoon Yoo", email = "bhyoo@bhyoo.com" }]
 requires-python = ">=3.12"
 keywords = [
     "mcp",
+    "mcp-server",
     "model-context-protocol",
     "kwin",
     "kde",
     "wayland",
+    "wayland-automation",
     "gui-automation",
     "desktop-automation",
     "plasma",
     "testing",
     "e2e-testing",
+    "headless-testing",
     "ai-agents",
     "accessibility",
+    "at-spi2",
+    "libei",
     "linux-desktop",
     "headless",
     "claude-code",
@@ -51,6 +56,7 @@ Homepage = "https://github.com/isac322/kwin-mcp"
 Repository = "https://github.com/isac322/kwin-mcp"
 Issues = "https://github.com/isac322/kwin-mcp/issues"
 Changelog = "https://github.com/isac322/kwin-mcp/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/isac322/kwin-mcp#readme"
 
 [project.scripts]
 kwin-mcp = "kwin_mcp.server:main"

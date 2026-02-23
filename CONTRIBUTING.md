@@ -1,0 +1,111 @@
+# Contributing to kwin-mcp
+
+Thank you for your interest in contributing to kwin-mcp, an MCP server for Linux desktop GUI automation on KDE Plasma 6 Wayland.
+
+## Development Setup
+
+### Prerequisites
+
+- Python 3.12+
+- KDE Plasma 6 on Wayland (for running and testing)
+- [uv](https://docs.astral.sh/uv/) package manager
+
+### System Dependencies
+
+Install the required system packages for your distribution:
+
+**Arch Linux / Manjaro:**
+
+```bash
+sudo pacman -S kwin spectacle at-spi2-core python-gobject dbus-python-common
+
+# Optional: for clipboard and Unicode input
+sudo pacman -S wl-clipboard wtype wayland-utils
+```
+
+**Fedora (KDE Spin):**
+
+```bash
+sudo dnf install kwin-wayland spectacle at-spi2-core python3-gobject dbus-python
+
+# Optional
+sudo dnf install wl-clipboard wtype wayland-utils
+```
+
+**Kubuntu / KDE Neon:**
+
+```bash
+sudo apt install kwin-wayland spectacle at-spi2-core python3-gi gir1.2-atspi-2.0 python3-dbus
+
+# Optional
+sudo apt install wl-clipboard wtype wayland-utils
+```
+
+### Clone and Install
+
+```bash
+git clone https://github.com/isac322/kwin-mcp.git
+cd kwin-mcp
+uv sync
+```
+
+## Code Style
+
+This project uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting, and [ty](https://docs.astral.sh/ty/) for type checking.
+
+```bash
+uv run ruff check .       # Lint
+uv run ruff format .      # Format
+uv run ty check           # Type check
+```
+
+Key style rules:
+
+- Python 3.12+ syntax (use `type` aliases, `|` unions, etc.)
+- Double quotes for strings
+- Line length: 100 characters
+- Type hints required for all function signatures
+- All code comments and docstrings in English
+
+## Testing Changes
+
+After modifying kwin-mcp code, verify your changes via the interactive CLI:
+
+```bash
+uv run python -m kwin_mcp.cli
+```
+
+The CLI provides the same functionality as the MCP server and allows you to test tools interactively. Use `session_start` to launch an isolated KWin session, then test your changes.
+
+> **Note**: Do not test via the MCP server if it was started before your code changes -- it will still be running the old code. Always use the CLI for verification.
+
+## Project Structure
+
+```
+src/kwin_mcp/
+├── core.py            # AutomationEngine — MCP-independent automation logic
+├── server.py          # MCP server (thin wrappers around AutomationEngine)
+├── cli.py             # Interactive REPL + pipe mode
+├── session.py         # Isolated KWin Wayland session management
+├── screenshot.py      # Screenshot capture via KWin ScreenShot2 D-Bus
+├── accessibility.py   # AT-SPI2 accessibility tree inspection
+└── input.py           # Input injection via KWin EIS D-Bus + libei
+```
+
+## Pull Request Process
+
+1. Fork the repository and create a feature branch
+2. Make your changes following the code style guidelines above
+3. Run all checks: `uv run ruff check . && uv run ruff format --check . && uv run ty check`
+4. Update `CHANGELOG.md` if your change is user-facing (new tools, bug fixes, behavior changes)
+5. Update `README.md` if you add new tools or change existing tool behavior
+6. Open a pull request with a clear description of the changes
+
+## Reporting Issues
+
+- **Bug reports**: Use the [bug report template](https://github.com/isac322/kwin-mcp/issues/new?template=bug_report.md) and include your kwin-mcp version, OS, KDE Plasma version, and steps to reproduce
+- **Feature requests**: Use the [feature request template](https://github.com/isac322/kwin-mcp/issues/new?template=feature_request.md) with a clear use case description
+
+## License
+
+By contributing to kwin-mcp, you agree that your contributions will be licensed under the [MIT License](LICENSE).

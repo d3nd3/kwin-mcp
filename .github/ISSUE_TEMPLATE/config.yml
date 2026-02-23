@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/isac322/kwin-mcp#readme
+    about: Read the README for usage instructions and available tools
+  - name: PyPI Package
+    url: https://pypi.org/project/kwin-mcp/
+    about: View the package on PyPI

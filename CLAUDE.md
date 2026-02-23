@@ -59,3 +59,54 @@ See ROADMAP.md. Key modules:
 - `kwin`: KWin Wayland compositor (installed)
 - `spectacle`: Screenshot tool (installed, fallback)
 - `selenium-webdriver-at-spi`: inputsynth binary (AUR, may need installation)
+
+## Documentation & SEO
+
+When writing or editing any documentation (README.md, CHANGELOG.md, GitHub release notes, pyproject.toml metadata, or repository settings), follow these SEO guidelines.
+
+### Target Keywords
+
+**Primary**: kwin-mcp, MCP server, GUI automation, KDE Plasma, Wayland automation, Linux desktop automation
+**Secondary**: headless GUI testing, AI agent desktop, accessibility tree, AT-SPI2, libei, EIS, KWin virtual session, desktop testing framework, Wayland compositor testing, MCP tools
+**Long-tail**: headless Wayland GUI testing, KDE Plasma automated testing, Linux GUI test automation CI/CD, Claude Code desktop automation, AI-driven Linux desktop testing
+
+### README.md Rules
+
+- H1 must be the project name; the line immediately after must be a bold description under 160 characters (acts as meta description for GitHub/search engines)
+- Include a badge row (PyPI version, downloads, Python version, license, CI status)
+- Use keyword-rich headings (e.g. "Available Tools", "System Requirements", "How It Works")
+- Maintain the tool reference tables with tool name, parameters, and description columns
+- Include copy-paste installation commands (uv, pip, from source)
+- Cross-link sections with a Table of Contents
+- Keep the architecture diagram (ASCII art) up to date when adding tools or modules
+
+### CHANGELOG.md Rules
+
+- Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format
+- Use Added / Changed / Deprecated / Removed / Fixed / Security categories
+- Name specific tools (e.g. `mouse_click`, `accessibility_tree`) in entries
+- Include comparison links at the bottom (`[0.x.y]: https://github.com/...`)
+- Maintain an `[Unreleased]` section at the top for in-progress changes
+
+### GitHub Release Notes Rules
+
+- Always written in English
+- **Minor+ releases** structure: opening paragraph with value proposition -> Highlights (bullet list) -> New Tools table (if applicable) -> Installation commands -> Full Changelog comparison link
+- **Patch releases** structure: What's Changed -> detailed description -> Full Changelog comparison link
+- First sentence must convey the value proposition (what the user gains)
+- Name exact technologies: AT-SPI2, libei, EIS, KWin ScreenShot2, D-Bus, PyGObject, wl-clipboard, wtype
+- Include tool counts when relevant (e.g. "29 MCP tools" or "17 new tools")
+
+### pyproject.toml SEO Rules
+
+- `description` must be under 120 characters and include "MCP server" + "Linux" + "GUI automation" + "KDE Plasma" + "Wayland"
+- Maintain 20+ keywords covering: protocol (mcp, model-context-protocol), compositor (kwin, kde, plasma, wayland), purpose (gui-automation, desktop-automation, testing, e2e-testing, headless, headless-testing), technology (at-spi2, libei, accessibility, ai-agents), ecosystem (claude-code, linux-desktop, wayland-automation, mcp-server)
+- Keep classifiers up to date (Development Status, Python versions, Topics)
+- `[project.urls]` must include Homepage, Repository, Issues, Changelog, and Documentation
+
+### GitHub Repository Decoration Rules
+
+- **About description**: must match pyproject.toml `description` or be a shorter variant with primary keywords
+- **Topics**: maintain 15-20 topics mirroring pyproject.toml keywords plus GitHub-specific tags (e.g. `hacktoberfest` when applicable)
+- **Homepage URL**: link to PyPI project page (`https://pypi.org/project/kwin-mcp/`)
+- **Social preview**: use a branded 1280x640 image with project name, tagline, and technology logos/icons
