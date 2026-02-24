@@ -148,7 +148,7 @@ kwin-mcp-cli
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `session_start` | `app_command?` `str`, `screen_width?` `int` (1920), `screen_height?` `int` (1080), `enable_clipboard?` `bool` (false), `keep_screenshots?` `bool` (false), `env?` `dict` | Start an isolated KWin Wayland session, optionally launching an app. Set `enable_clipboard=true` to enable clipboard tools (requires `wl-clipboard`). Set `keep_screenshots=true` to preserve screenshot files after `session_stop`. Pass extra environment variables via `env`. |
+| `session_start` | `app_command?` `str`, `screen_width?` `int` (1920), `screen_height?` `int` (1080), `enable_clipboard?` `bool` (false), `keep_screenshots?` `bool` (false), `isolate_home?` `bool` (false), `keep_home?` `bool` (false), `env?` `dict` | Start an isolated KWin Wayland session, optionally launching an app. Set `enable_clipboard=true` to enable clipboard tools (requires `wl-clipboard`). Set `keep_screenshots=true` to preserve screenshot files after `session_stop`. Set `isolate_home=true` to create a temporary HOME with isolated XDG directories (config, data, cache, state), preventing apps from reading/writing host user settings. Set `keep_home=true` to preserve the isolated home directory after `session_stop`. Pass extra environment variables via `env`. |
 | `session_stop` | _(none)_ | Stop the session and clean up all processes |
 
 ### Observation (3 tools)
@@ -259,13 +259,14 @@ kwin-mcp server  (29 tools)       kwin-mcp-cli (interactive REPL)
   +-- wayland_info --------------> wayland-info
 ```
 
-### Triple Isolation
+### Triple Isolation (+ Optional Home Isolation)
 
 kwin-mcp provides three layers of isolation from the host desktop:
 
 1. **D-Bus isolation** -- `dbus-run-session` creates a private session bus. The isolated session's services (KWin, AT-SPI2, portals) are invisible to the host.
 2. **Display isolation** -- `kwin_wayland --virtual` creates its own Wayland compositor with a virtual framebuffer. No windows appear on the host display.
 3. **Input isolation** -- Input events are injected through KWin's EIS interface into the isolated compositor only. The host desktop receives no input from kwin-mcp.
+4. **Home directory isolation** (optional) -- When `isolate_home=true` is set in `session_start`, a temporary HOME directory is created with isolated XDG directories (`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`). Apps in the session cannot read or modify host user settings (e.g. `~/.config/kdeglobals`), improving test reproducibility and safety. `XDG_RUNTIME_DIR` is intentionally not isolated because the Wayland socket resides there.
 
 ### Input Injection
 

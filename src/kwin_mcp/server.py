@@ -45,6 +45,21 @@ def session_start(
             "Useful for debugging. Files must be cleaned up manually when enabled."
         ),
     ] = False,
+    isolate_home: Annotated[
+        bool,
+        Field(
+            description="Create a temporary HOME directory with isolated XDG directories "
+            "(config, data, cache, state). Prevents apps from reading/writing host user settings."
+        ),
+    ] = False,
+    keep_home: Annotated[
+        bool,
+        Field(
+            description="Keep the isolated home directory after session_stop "
+            "instead of deleting it. Only effective when isolate_home=true. "
+            "Files must be cleaned up manually when enabled."
+        ),
+    ] = False,
     env: Annotated[
         dict[str, str] | None,
         Field(description="Extra environment variables to pass to the launched app."),
@@ -62,6 +77,8 @@ def session_start(
         screen_height=screen_height,
         enable_clipboard=enable_clipboard,
         keep_screenshots=keep_screenshots,
+        isolate_home=isolate_home,
+        keep_home=keep_home,
         env=env,
     )
 

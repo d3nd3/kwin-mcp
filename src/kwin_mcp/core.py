@@ -82,6 +82,13 @@ class AutomationEngine:
             if info.dbus_address:
                 env["DBUS_SESSION_BUS_ADDRESS"] = info.dbus_address
             env["WAYLAND_DISPLAY"] = info.wayland_socket
+            if info.home_dir:
+                home = str(info.home_dir)
+                env["HOME"] = home
+                env["XDG_CONFIG_HOME"] = str(info.home_dir / ".config")
+                env["XDG_DATA_HOME"] = str(info.home_dir / ".local" / "share")
+                env["XDG_CACHE_HOME"] = str(info.home_dir / ".cache")
+                env["XDG_STATE_HOME"] = str(info.home_dir / ".local" / "state")
         env["QT_QPA_PLATFORM"] = "wayland"
         env.pop("DISPLAY", None)
         return env
@@ -143,6 +150,8 @@ class AutomationEngine:
         screen_height: int = 1080,
         enable_clipboard: bool = False,
         keep_screenshots: bool = False,
+        isolate_home: bool = False,
+        keep_home: bool = False,
         env: dict[str, str] | None = None,
     ) -> str:
         """Start an isolated KWin Wayland session, optionally launching an app."""
@@ -157,10 +166,14 @@ class AutomationEngine:
             screen_height=screen_height,
             enable_clipboard=enable_clipboard,
             keep_screenshots=keep_screenshots,
+            isolate_home=isolate_home,
+            keep_home=keep_home,
         )
         info = self._session.start(config)
 
         result = f"Session started. Wayland socket: {info.wayland_socket}"
+        if info.home_dir:
+            result += f"\nIsolated home: {info.home_dir}"
 
         if app_command:
             cmd = shlex.split(app_command)

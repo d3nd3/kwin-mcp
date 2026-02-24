@@ -113,7 +113,15 @@ Triple isolation ensures no impact on the host desktop:
 - [x] Reduce AT-SPI bus launcher sleep from 0.5s to 0.2s (verified)
 - **Architecture**: `core.py` (AutomationEngine) ← `server.py` (MCP wrapper) + `cli.py` (CLI wrapper)
 
-### M9: Pluggable CLI Backend (Auto-detect Alternatives)
+### M9: Home Directory Isolation ✅
+- [x] Optional `isolate_home` parameter to create a temporary HOME with isolated XDG directories
+- [x] `keep_home` parameter to preserve the isolated home after session stop
+- [x] XDG Base Directory Specification compliance (`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`)
+- [x] `XDG_RUNTIME_DIR` intentionally not isolated (Wayland socket resides there)
+- [x] DRY `_xdg_isolation_env()` helper shared across `_build_env()`, `launch_app()`, and `_session_env()`
+- **Goal**: Prevent apps in isolated sessions from reading/writing host user settings for reproducible and safe testing
+
+### M10: Pluggable CLI Backend (Auto-detect Alternatives)
 - [ ] Research functionally equivalent alternatives for each external CLI (`wl-copy`/`wl-paste`, `wtype`, `spectacle`, `dbus-send`)
 - [ ] Implement auto-detection: discover available CLIs at runtime and select the best match
 - [ ] Ensure all alternatives are functionally identical (no behavioral differences)

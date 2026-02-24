@@ -27,6 +27,8 @@ class SessionConfig:
     screen_height: int = 1080
     enable_clipboard: bool = False
     keep_screenshots: bool = False
+    isolate_home: bool = False
+    keep_home: bool = False
     extra_env: dict[str, str] = field(default_factory=dict)
 
 
@@ -48,6 +50,7 @@ class SessionInfo:
     wayland_socket: str
     kwin_pid: int
     screenshot_dir: Path = field(default_factory=lambda: Path("/tmp"))
+    home_dir: Path | None = None
     app_pid: int | None = None
     wrapper_pid: int | None = None
     apps: dict[int, AppInfo] = field(default_factory=dict)
@@ -67,6 +70,7 @@ class Session:
         self._socket_name: str = ""
         self._app_counter: int = 0
         self._config: SessionConfig | None = None
+        self._home_dir: Path | None = None
 
     @property
     def is_running(self) -> bool:
@@ -82,6 +86,19 @@ class Session:
     def wayland_socket(self) -> str:
         return self._socket_name
 
+    def _xdg_isolation_env(self) -> dict[str, str]:
+        """Build XDG environment overrides for home directory isolation."""
+        if self._home_dir is None:
+            return {}
+        home = str(self._home_dir)
+        return {
+            "HOME": home,
+            "XDG_CONFIG_HOME": str(self._home_dir / ".config"),
+            "XDG_DATA_HOME": str(self._home_dir / ".local" / "share"),
+            "XDG_CACHE_HOME": str(self._home_dir / ".cache"),
+            "XDG_STATE_HOME": str(self._home_dir / ".local" / "state"),
+        }
+
     def start(self, config: SessionConfig | None = None) -> SessionInfo:
         """Start an isolated KWin Wayland session.
 
@@ -96,6 +113,18 @@ class Session:
         self._config = config
 
         self._socket_name = config.socket_name or f"wayland-mcp-{os.getpid()}-{int(time.time())}"
+
+        # Create isolated home directory if requested
+        if config.isolate_home:
+            self._home_dir = Path(tempfile.mkdtemp(prefix="kwin-mcp-home-"))
+            for subdir in (
+                ".config",
+                Path(".local") / "share",
+                Path(".local") / "state",
+                ".cache",
+                ".screenshots",
+            ):
+                (self._home_dir / subdir).mkdir(parents=True, exist_ok=True)
 
         # Clean up any stale socket files
         runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
@@ -146,13 +175,17 @@ class Session:
             msg = "Session setup failed: did not receive READY signal"
             raise RuntimeError(msg)
 
-        screenshot_dir = Path(tempfile.mkdtemp(prefix="kwin-mcp-screenshots-"))
+        if self._home_dir is not None:
+            screenshot_dir = self._home_dir / ".screenshots"
+        else:
+            screenshot_dir = Path(tempfile.mkdtemp(prefix="kwin-mcp-screenshots-"))
 
         self._info = SessionInfo(
             dbus_address=dbus_address,
             wayland_socket=self._socket_name,
             kwin_pid=self._process.pid,
             screenshot_dir=screenshot_dir,
+            home_dir=self._home_dir,
         )
         return self._info
 
@@ -172,6 +205,7 @@ class Session:
             "QT_LINUX_ACCESSIBILITY_ALWAYS_ON": "1",
             "QT_ACCESSIBILITY": "1",
         }
+        env.update(self._xdg_isolation_env())
         if extra_env:
             env.update(extra_env)
         if self._info.dbus_address:
@@ -257,10 +291,23 @@ class Session:
             with contextlib.suppress(subprocess.TimeoutExpired):
                 self._process.wait(timeout=3)
 
-        # Clean up screenshot directory unless keep_screenshots is set
-        keep = self._config is not None and self._config.keep_screenshots
-        if not keep and self._info and self._info.screenshot_dir.exists():
-            shutil.rmtree(self._info.screenshot_dir, ignore_errors=True)
+        # Clean up home directory and/or screenshot directory
+        if self._home_dir is not None:
+            keep_home = self._config is not None and self._config.keep_home
+            keep_screenshots = self._config is not None and self._config.keep_screenshots
+            if not keep_home:
+                # Remove entire home dir (includes screenshots)
+                shutil.rmtree(self._home_dir, ignore_errors=True)
+            elif not keep_screenshots:
+                # Keep home but remove screenshots subdirectory
+                screenshots = self._home_dir / ".screenshots"
+                if screenshots.exists():
+                    shutil.rmtree(screenshots, ignore_errors=True)
+        else:
+            # No isolated home — use original screenshot cleanup logic
+            keep = self._config is not None and self._config.keep_screenshots
+            if not keep and self._info and self._info.screenshot_dir.exists():
+                shutil.rmtree(self._info.screenshot_dir, ignore_errors=True)
 
         # Clean up socket files
         runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
@@ -270,6 +317,7 @@ class Session:
 
         self._process = None
         self._info = None
+        self._home_dir = None
 
     def _build_wrapper_script(self, config: SessionConfig) -> str:
         """Build the bash script that runs inside dbus-run-session."""
@@ -346,6 +394,7 @@ wait $KWIN_PID
         env.pop("WAYLAND_DISPLAY", None)
         env.pop("DISPLAY", None)
 
+        env.update(self._xdg_isolation_env())
         env.update(config.extra_env)
         return env
 
