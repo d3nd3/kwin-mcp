@@ -58,6 +58,7 @@ class SessionInfo:
     app_pid: int | None = None
     wrapper_pid: int | None = None
     apps: dict[int, AppInfo] = field(default_factory=dict)
+    session_log_path: Path | None = None
 
 
 class Session:
@@ -217,6 +218,7 @@ class Session:
             kwin_pid=self._process.pid if self._process else 0,
             screenshot_dir=screenshot_dir,
             home_dir=self._home_dir,
+            session_log_path=self._session_log_path,
         )
         self._info = info
         return info

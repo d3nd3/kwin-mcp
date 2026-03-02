@@ -237,7 +237,7 @@ class AutomationEngine:
 
     # ── Screenshot / Accessibility ────────────────────────────────────────
 
-    def screenshot(self, include_cursor: bool = False) -> str:
+    def screenshot(self, include_cursor: bool = False, active_window_only: bool = False) -> str:
         """Capture a screenshot of the isolated session."""
         session = self._get_session()
         info = session.info
@@ -250,9 +250,13 @@ class AutomationEngine:
             wayland_socket=info.wayland_socket,
             include_cursor=include_cursor,
             output_dir=info.screenshot_dir,
+            active_window_only=active_window_only,
         )
         size_kb = path.stat().st_size / 1024
-        return f"Screenshot saved: {path} ({size_kb:.1f} KB)"
+        log_suffix = ""
+        if getattr(info, "session_log_path", None):
+            log_suffix = f" (session log: {info.session_log_path})"
+        return f"Screenshot saved: {path} ({size_kb:.1f} KB){log_suffix}"
 
     def accessibility_tree(self, app_name: str = "", max_depth: int = 15, role: str = "") -> str:
         """Get the accessibility tree of apps in the isolated session."""

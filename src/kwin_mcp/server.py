@@ -131,13 +131,22 @@ def screenshot(
         bool,
         Field(description="If true, render the mouse cursor in the screenshot."),
     ] = False,
+    active_window_only: Annotated[
+        bool,
+        Field(
+            description=(
+                "If true, capture only the active window in the virtual session "
+                "instead of the full virtual display."
+            ),
+        ),
+    ] = False,
 ) -> str:
     """Capture a screenshot of the isolated session.
 
     Requires an active session. Returns the file path to the saved PNG image
     and its size in KB.
     """
-    return _engine.screenshot(include_cursor=include_cursor)
+    return _engine.screenshot(include_cursor=include_cursor, active_window_only=active_window_only)
 
 
 @mcp.tool()

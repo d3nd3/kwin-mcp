@@ -155,7 +155,7 @@ kwin-mcp-cli
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `screenshot` | `include_cursor?` `bool` (false) | Capture a screenshot of the virtual display (saved as PNG, returns file path) |
+| `screenshot` | `include_cursor?` `bool` (false), `active_window_only?` `bool` (false) | Capture a screenshot of the virtual display or, when `active_window_only=true`, only the active window (saved as PNG, returns file path) |
 | `accessibility_tree` | `app_name?` `str`, `max_depth?` `int` (15), `role?` `str` | Get the AT-SPI2 widget tree with roles, names, states, and coordinates. Use `role` to filter to specific element types (e.g. `"button"`, `"check box"`). Non-matching elements are hidden but their children are still traversed. |
 | `find_ui_elements` | `query` `str`, `app_name?` `str`, `states?` `list[str]` | Search for UI elements by name, role, or description (case-insensitive). Optionally filter by AT-SPI2 states (e.g. `["focused"]`, `["active", "visible"]`). `query` can be empty when filtering by states only. |
 

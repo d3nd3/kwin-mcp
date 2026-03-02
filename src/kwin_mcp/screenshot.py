@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import time
@@ -11,12 +12,16 @@ import dbus
 import dbus.bus
 
 
+_log = logging.getLogger(__name__)
+
+
 def capture_screenshot_to_file(
     dbus_address: str = "",
     wayland_socket: str = "",
     *,
     include_cursor: bool = False,
     output_dir: Path | None = None,
+    active_window_only: bool = False,
 ) -> Path:
     """Capture a screenshot and save to a file.
 
@@ -36,12 +41,27 @@ def capture_screenshot_to_file(
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     output_path = output_dir / f"screenshot_{timestamp}.png"
 
+    _log.warning(
+        "capture_screenshot_to_file path=%s include_cursor=%s active_window_only=%s dbus=%s wayland=%s",
+        output_path,
+        include_cursor,
+        active_window_only,
+        bool(dbus_address),
+        wayland_socket,
+    )
+
     _capture_via_spectacle(
         dbus_address,
         wayland_socket,
         output_path=output_path,
         include_cursor=include_cursor,
+        active_window_only=active_window_only,
     )
+    try:
+        size = output_path.stat().st_size
+    except OSError:
+        size = -1
+    _log.warning("capture_screenshot_to_file completed path=%s size_bytes=%s", output_path, size)
     return output_path
 
 
@@ -99,6 +119,14 @@ def capture_screenshot_dbus(
     width = int(results["width"])
     height = int(results["height"])
     stride = int(results["stride"])
+
+    _log.warning(
+        "capture_screenshot_dbus frame width=%s height=%s stride=%s bytes=%s",
+        width,
+        height,
+        stride,
+        len(data),
+    )
 
     # KWin returns raw ARGB32_Premultiplied (Qt format 6) in native byte order.
     # On little-endian systems, bytes are stored as BGRA.
@@ -197,9 +225,12 @@ def _capture_via_spectacle(
     *,
     output_path: Path,
     include_cursor: bool = False,
+    active_window_only: bool = False,
 ) -> None:
     """Capture screenshot using spectacle CLI in background mode."""
     cmd = ["spectacle", "-b", "-f", "-n", "-o", str(output_path)]
+    if active_window_only:
+        cmd.insert(1, "-a")
     if include_cursor:
         cmd.append("-p")
 
@@ -211,6 +242,12 @@ def _capture_via_spectacle(
         env["QT_QPA_PLATFORM"] = "wayland"
     # Remove host display refs
     env.pop("DISPLAY", None)
+
+    debug_env = {
+        k: env.get(k)
+        for k in ("DBUS_SESSION_BUS_ADDRESS", "WAYLAND_DISPLAY", "QT_QPA_PLATFORM", "XDG_RUNTIME_DIR")
+    }
+    _log.warning("spectacle cmd=%s env=%s output=%s", " ".join(cmd), debug_env, output_path)
 
     try:
         result = subprocess.run(
@@ -227,11 +264,16 @@ def _capture_via_spectacle(
         )
         raise RuntimeError(msg) from None
 
+    stderr = result.stderr.decode(errors="replace").strip()
+    _log.warning("spectacle exit=%s stderr=%s", result.returncode, stderr[:200])
+
     if result.returncode != 0:
-        stderr = result.stderr.decode(errors="replace")
         msg = f"spectacle failed (exit {result.returncode}): {stderr}"
         raise RuntimeError(msg)
 
     if not output_path.exists() or output_path.stat().st_size == 0:
         msg = "spectacle produced no output"
         raise RuntimeError(msg)
+
+    size = output_path.stat().st_size
+    _log.warning("spectacle wrote path=%s size_bytes=%s", output_path, size)
