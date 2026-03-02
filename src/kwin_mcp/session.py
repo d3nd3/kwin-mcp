@@ -16,6 +16,10 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 @dataclass
@@ -49,7 +53,7 @@ class SessionInfo:
     dbus_address: str
     wayland_socket: str
     kwin_pid: int
-    screenshot_dir: Path = field(default_factory=lambda: Path("/tmp"))
+    screenshot_dir: Path
     home_dir: Path | None = None
     app_pid: int | None = None
     wrapper_pid: int | None = None
@@ -71,12 +75,11 @@ class Session:
         self._app_counter: int = 0
         self._config: SessionConfig | None = None
         self._home_dir: Path | None = None
+        self._session_log_path: Path | None = None
 
     @property
     def is_running(self) -> bool:
-        if self._process is None:
-            return False
-        return self._process.poll() is None
+        return self._process is not None and self._process.poll() is None
 
     @property
     def info(self) -> SessionInfo | None:
@@ -86,7 +89,7 @@ class Session:
     def wayland_socket(self) -> str:
         return self._socket_name
 
-    def _xdg_isolation_env(self) -> dict[str, str]:
+    def _xdg_isolation_env(self) -> Mapping[str, str]:
         """Build XDG environment overrides for home directory isolation."""
         if self._home_dir is None:
             return {}
@@ -125,9 +128,24 @@ class Session:
                 ".screenshots",
             ):
                 (self._home_dir / subdir).mkdir(parents=True, exist_ok=True)
+        else:
+            self._home_dir = None
+
+        # Prepare log files for the session itself (dbus-run-session + kwin)
+        self._app_counter = 0
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+
+        if self._home_dir:
+            self._session_log_path = self._home_dir / "session.log"
+        else:
+            # use a temporary file for logging if not isolating home
+            fd, path = tempfile.mkstemp(prefix="kwin-mcp-session-", suffix=".log")
+            os.close(fd)
+            self._session_log_path = Path(path)
+
+        session_log_file = self._session_log_path.open("ab")
 
         # Clean up any stale socket files
-        runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
         for suffix in ("", ".lock"):
             path = Path(runtime_dir) / f"{self._socket_name}{suffix}"
             path.unlink(missing_ok=True)
@@ -139,20 +157,21 @@ class Session:
         self._process = subprocess.Popen(
             ["dbus-run-session", "bash", "-c", wrapper_script],
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=session_log_file,
             env=self._build_env(config),
             start_new_session=True,
         )
+        # The child has inherited the log file handle
+        session_log_file.close()
 
         # Read startup output from the wrapper script.
         # Expected lines: DBUS_SESSION_BUS_ADDRESS=..., READY
-        # Any other lines (e.g. from D-Bus activation) are ignored.
         dbus_address = ""
         got_ready = False
-        if self._process.stdout:
+        if self._process is not None and self._process.stdout:
             while True:
                 line = self._process.stdout.readline().decode().strip()
-                if not line and self._process.poll() is not None:
+                if not line and (self._process.poll() is not None):
                     break
                 if line.startswith("DBUS_SESSION_BUS_ADDRESS="):
                     dbus_address = line.split("=", 1)[1]
@@ -160,34 +179,47 @@ class Session:
                     got_ready = True
                     break
 
-        # Wait for kwin to be ready (socket file appears)
-        socket_path = Path(runtime_dir) / self._socket_name
-        if not self._wait_for_socket(socket_path, timeout=10.0):
-            self.stop()
-            stderr = ""
-            if self._process and self._process.stderr:
-                stderr = self._process.stderr.read().decode(errors="replace")
-            msg = f"KWin failed to start. stderr: {stderr}"
-            raise RuntimeError(msg)
+            # Start a background thread to drain remaining stdout to prevent hangs
+            import threading
 
-        if not got_ready:
-            self.stop()
-            msg = "Session setup failed: did not receive READY signal"
-            raise RuntimeError(msg)
+            def drain(stream: subprocess.IO[bytes]) -> None:
+                try:
+                    for _ in stream:
+                        pass
+                except Exception:
+                    pass
 
+            threading.Thread(target=drain, args=(self._process.stdout,), daemon=True).start()
+
+        # Determine screenshot directory
         if self._home_dir is not None:
             screenshot_dir = self._home_dir / ".screenshots"
         else:
             screenshot_dir = Path(tempfile.mkdtemp(prefix="kwin-mcp-screenshots-"))
 
-        self._info = SessionInfo(
+        # Wait for kwin to be ready (socket file appears)
+        socket_path = Path(runtime_dir) / self._socket_name
+        if not self._wait_for_socket(socket_path, timeout=10.0):
+            self.stop()
+            log_path_str = str(self._session_log_path) if self._session_log_path else "unknown"
+            msg = f"KWin failed to start. See logs in {log_path_str}"
+            raise RuntimeError(msg)
+
+        if not got_ready:
+            self.stop()
+            log_path_str = str(self._session_log_path) if self._session_log_path else "unknown"
+            msg = f"Session setup failed: READY not received. See logs in {log_path_str}"
+            raise RuntimeError(msg)
+
+        info = SessionInfo(
             dbus_address=dbus_address,
             wayland_socket=self._socket_name,
-            kwin_pid=self._process.pid,
+            kwin_pid=self._process.pid if self._process else 0,
             screenshot_dir=screenshot_dir,
             home_dir=self._home_dir,
         )
-        return self._info
+        self._info = info
+        return info
 
     def launch_app(self, command: list[str], extra_env: dict[str, str] | None = None) -> AppInfo:
         """Launch an application inside the isolated session.
@@ -270,26 +302,39 @@ class Session:
         if self._process is None:
             return
 
+        proc = self._process
+        self._process = None  # Prevent re-entry
+
         # Send SIGTERM to the entire process group (all children)
         try:
-            pgid = os.getpgid(self._process.pid)
+            pgid = os.getpgid(proc.pid)
             os.killpg(pgid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
+        except Exception:
+            # If killpg fails, try terminate() on the parent
+            try:
+                proc.terminate()
+            except Exception:
+                pass
 
+        # Wait for shutdown
         try:
-            self._process.wait(timeout=5)
+            proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
+            # Give processes a moment to clean up after SIGTERM before SIGKILL
+            time.sleep(0.1)
             # Force kill the entire process group
             try:
-                pgid = os.getpgid(self._process.pid)
+                pgid = os.getpgid(proc.pid)
                 os.killpg(pgid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            try:
+                proc.wait(timeout=2)
+            except Exception:
                 pass
-            with contextlib.suppress(ProcessLookupError):
-                self._process.kill()
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                self._process.wait(timeout=3)
 
         # Clean up home directory and/or screenshot directory
         if self._home_dir is not None:

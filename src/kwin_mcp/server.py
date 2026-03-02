@@ -6,6 +6,10 @@ delegating all logic to AutomationEngine in core.py.
 
 from __future__ import annotations
 
+import atexit
+import logging
+import signal
+import sys
 from typing import Annotated
 
 from mcp.server.fastmcp import FastMCP
@@ -13,8 +17,32 @@ from pydantic import Field
 
 from kwin_mcp.core import AutomationEngine
 
+# Quieter logging for Cursor (everything on stderr is logged as [error])
+logging.basicConfig(level=logging.WARNING)
+for logger in ["mcp", "fastmcp", "uvicorn"]:
+    logging.getLogger(logger).setLevel(logging.WARNING)
+
 mcp = FastMCP("kwin-mcp")
 _engine = AutomationEngine()
+
+
+# Ensure session cleanup on exit
+def _cleanup() -> None:
+    try:
+        _engine.session_stop()
+    except Exception:
+        pass
+
+
+atexit.register(_cleanup)
+
+
+# Handle SIGTERM gracefully for Cursor/MCP shutdown
+def _on_sigterm(signum, frame):
+    sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, _on_sigterm)
 
 
 # ── Session management ──────────────────────────────────────────────────
